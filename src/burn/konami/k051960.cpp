@@ -3,94 +3,25 @@
 #include "tiles_generic.h"
 #include "konamiic.h"
 
+int K051960_irq_enabled;
+int K051960_nmi_enabled;
+int K051960_spriteflip;
+
 static unsigned char *K051960Ram = NULL;
 static unsigned char K051960SpriteRomBank[3];
 int K051960ReadRoms;
 static int K051960RomOffset;
 static unsigned int K051960RomMask;
 static unsigned char *K051960Rom;
+static unsigned char blank_tile[0x100];
+
+static int nSpriteXOffset;
+static int nSpriteYOffset;
 
 typedef void (*K051960_Callback)(int *Code, int *Colour, int *Priority, int *Shadow);
 static K051960_Callback K051960Callback;
 
-static void RenderSpriteZoom(int Code, int sx, int sy, int Colour, int xFlip, int yFlip, int xScale, int yScale, unsigned char* pSource)
-{
-	UINT8 *SourceBase = pSource + ((Code % 0x4000) * 16 * 16);
-	
-	int SpriteScreenHeight = (yScale * 16 + 0x8000) >> 16;
-	int SpriteScreenWidth = (xScale * 16 + 0x8000) >> 16;
-	
-	Colour = 0x10 * (Colour % 0x100);
-	
-	if (SpriteScreenWidth && SpriteScreenHeight) {
-		int dx = (16 << 16) / SpriteScreenWidth;
-		int dy = (16 << 16) / SpriteScreenHeight;
-		
-		int ex = sx + SpriteScreenWidth;
-		int ey = sy + SpriteScreenHeight;
-		
-		int xIndexBase;
-		int yIndex;
-		
-		if (xFlip) {
-			xIndexBase = (SpriteScreenWidth - 1) * dx;
-			dx = -dx;
-		} else {
-			xIndexBase = 0;
-		}
-		
-		if (yFlip) {
-			yIndex = (SpriteScreenHeight - 1) * dy;
-			dy = -dy;
-		} else {
-			yIndex = 0;
-		}
-		
-		if (sx < 0) {
-			int Pixels = 0 - sx;
-			sx += Pixels;
-			xIndexBase += Pixels * dx;
-		}
-		
-		if (sy < 0) {
-			int Pixels = 0 - sy;
-			sy += Pixels;
-			yIndex += Pixels * dy;
-		}
-		
-		if (ex > nScreenWidth) {
-			int Pixels = ex - nScreenWidth;
-			ex -= Pixels;
-		}
-		
-		if (ey > nScreenHeight) {
-			int Pixels = ey - nScreenHeight;
-			ey -= Pixels;	
-		}
-		
-		if (ex > sx) {
-			int y;
-			
-			for (y = sy; y < ey; y++) {
-				UINT8 *Source = SourceBase + ((yIndex >> 16) * 16);
-				unsigned short* pPixel = pTransDraw + (y * nScreenWidth);
-				
-				int x, xIndex = xIndexBase;
-				for (x = sx; x < ex; x++) {
-					int c = Source[xIndex >> 16];
-					if (c != 0) {
-						pPixel[x] = c | Colour;
-					}
-					xIndex += dx;
-				}
-				
-				yIndex += dy;
-			}
-		}
-	}
-}
-
-void K051960SpritesRender(unsigned char *pSrc)
+void K051960SpritesRender(unsigned char *pSrc, int Priority)
 {
 #define NUM_SPRITES 128
 	int Offset, PriCode;
@@ -121,6 +52,10 @@ void K051960SpritesRender(unsigned char *pSrc)
 		Shadow = Colour & 0x80;
 		K051960Callback(&Code, &Colour, &Pri, &Shadow);
 
+		if (Priority != -1) {
+			if (Pri != Priority) continue; // not the best way to go about this...
+		}
+
 		Size = (K051960Ram[Offset + 1] & 0xe0) >> 5;
 		w = Width[Size];
 		h = Height[Size];
@@ -147,7 +82,7 @@ void K051960SpritesRender(unsigned char *pSrc)
 
 			for (y = 0; y < h; y++)	{
 				sy = oy + 16 * y;
-				
+				sy -= nSpriteYOffset;
 				sy -= 16;
 				
 				for (x = 0; x < w; x++)	{
@@ -161,6 +96,7 @@ void K051960SpritesRender(unsigned char *pSrc)
 					
 					sx &= 0x1ff;
 					sx -= 104;
+					sx -= nSpriteXOffset;
 					
 					if (xFlip) {
 						if (yFlip) {
@@ -183,7 +119,7 @@ void K051960SpritesRender(unsigned char *pSrc)
 			for (y = 0; y < h; y++)	{
 				sy = oy + ((yZoom * y + (1 << 11)) >> 12);
 				zh = (oy + ((yZoom * (y + 1) + (1 << 11)) >> 12)) - sy;
-				
+				sy -=nSpriteYOffset;
 				sy -= 16;
 
 				for (x = 0; x < w; x++)	{
@@ -198,8 +134,9 @@ void K051960SpritesRender(unsigned char *pSrc)
 					
 					sx &= 0x1ff;
 					sx -= 104;
+					sx -= nSpriteXOffset;
 
-					RenderSpriteZoom(c, sx, sy, Colour, xFlip, yFlip, (zw << 16) / 16, (zh << 16) / 16, pSrc);
+					RenderZoomedTile(pTransDraw, pSrc, c, Colour << 4 /*assume 4 bpp*/, 0, sx, sy, xFlip, yFlip, 16, 16, zw << 12, zh << 12);
 				}
 			}
 		}		
@@ -244,15 +181,27 @@ void K051960SetCallback(void (*Callback)(int *Code, int *Colour, int *Priority, 
 	K051960Callback = Callback;
 }
 
+void K051960SetSpriteOffset(int x, int y)
+{
+	nSpriteXOffset = x;
+	nSpriteYOffset = y;
+}
+
 void K051960Reset()
 {
 	memset(K051960SpriteRomBank, 0, 3);
 	K051960ReadRoms = 0;
 	K051960RomOffset = 0;
+
+	K051960_irq_enabled = 0;
+	K051960_nmi_enabled = 0;
+	K051960_spriteflip = 0;
 }
 
 void K051960Init(unsigned char* pRomSrc, unsigned int RomMask)
 {
+	nSpriteXOffset = nSpriteYOffset = 0;
+
 	K051960Ram = (unsigned char*)malloc(0x400);
 	
 	K051960RomMask = RomMask;
@@ -260,6 +209,10 @@ void K051960Init(unsigned char* pRomSrc, unsigned int RomMask)
 	K051960Rom = pRomSrc;
 	
 	KonamiIC_K051960InUse = 1;
+
+	memset (blank_tile, 0, 0x100);
+
+	nSpriteXOffset = nSpriteYOffset = 0;
 }
 
 void K051960Exit()
@@ -274,6 +227,8 @@ void K051960Exit()
 	memset(K051960SpriteRomBank, 0, 3);
 	K051960ReadRoms = 0;
 	K051960RomOffset = 0;
+
+	K051960Callback = NULL;
 }
 
 void K051960Scan(int nAction)
@@ -292,16 +247,19 @@ void K051960Scan(int nAction)
 		SCAN_VAR(K051960SpriteRomBank);
 		SCAN_VAR(K051960ReadRoms);
 		SCAN_VAR(K051960RomOffset);
+		SCAN_VAR(K051960_irq_enabled);
+		SCAN_VAR(K051960_nmi_enabled);
+		SCAN_VAR(K051960_spriteflip);
 	}
 }
 
 void K051937Write(unsigned int Offset, unsigned char Data)
 {
 	if (Offset == 0) {
-		if (Data & 0x01) bprintf(PRINT_IMPORTANT, _T("K051960 IRQ Enabled\n"));
-		if (Data & 0x04) bprintf(PRINT_IMPORTANT, _T("K051960 NMI Enabled\n"));
-		if (Data & 0x08) bprintf(PRINT_IMPORTANT, _T("K051960 Sprite Flip Enabled\n"));
-		K051960ReadRoms = Data & 0x20;
+		K051960_irq_enabled = Data & 0x01;
+		K051960_nmi_enabled = Data & 0x04;
+		K051960_spriteflip  = Data & 0x08;
+		K051960ReadRoms     = Data & 0x20;
 		return;
 	}
 	
@@ -310,3 +268,22 @@ void K051937Write(unsigned int Offset, unsigned char Data)
 		return;
 	}
 }
+
+unsigned char K051937Read(unsigned int Offset)
+{
+	if (K051960ReadRoms && Offset >= 4 && Offset < 8)
+	{
+		return K0519060FetchRomData(Offset & 3);
+	}
+	else
+	{
+		if (Offset == 0)
+		{
+			static int counter;
+			return (counter++) & 1;
+		}
+
+		return 0;
+	}
+}
+

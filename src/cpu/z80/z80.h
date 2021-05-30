@@ -7,10 +7,17 @@
 #define Z80_INPUT_LINE_NMI	32
 
 
+typedef union
+{
+	struct { UINT8 l,h,h2,h3; } b;
+	struct { UINT16 l,h; } w;
+	UINT32 d;
+} pair;
+
 typedef struct
 {
-	PAIR	prvpc,pc,sp,af,bc,de,hl,ix,iy;
-	PAIR	af2,bc2,de2,hl2;
+	pair	prvpc,pc,sp,af,bc,de,hl,ix,iy;
+	pair	af2,bc2,de2,hl2;
 	UINT8	r,r2,iff1,iff2,halt,im,i;
 	UINT8	nmi_state;			/* nmi line state */
 	UINT8	nmi_pending;		/* nmi pending */
@@ -53,6 +60,8 @@ extern void Z80SetIrqLine(int irqline, int state);
 extern void Z80GetContext (void *dst);
 extern void Z80SetContext (void *src);
 extern int Z80Scan(int nAction);
+
+extern unsigned char Z80Vector;
 
 typedef unsigned char (__fastcall *Z80ReadIoHandler)(unsigned int a);
 typedef void (__fastcall *Z80WriteIoHandler)(unsigned int a, unsigned char v);

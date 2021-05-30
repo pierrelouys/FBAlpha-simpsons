@@ -1,15 +1,14 @@
 // Z80 (Zed Eight-Ty) Interface
 
-#ifndef _ZET_H_
-#define _ZET_H_
+#include "z80.h"
 
 #ifndef FASTCALL
  #undef __fastcall
  #define __fastcall
 #endif
 
-//#define EMU_DRZ80
-#define EMU_MAME_Z80
+//#define EMU_DOZE					// Use Dave's 'Doze' Assembler Z80 emulator
+//#define EMU_MAME_Z80
 #define EMU_CZ80
 
 #ifdef EMU_DOZE
@@ -24,7 +23,6 @@
  #include "cz80.h"
 #endif
 extern int nHasZet;
-extern int nZetCpuCore; // 0 - CZ80, 1 - MAME_Z80
 void ZetWriteByte(unsigned short address, unsigned char data);
 unsigned char ZetReadByte(unsigned short address);
 int ZetInit(int nCount);
@@ -46,56 +44,44 @@ int ZetScan(int nAction);
 int ZetRun(int nCycles);
 void ZetRunEnd();
 void ZetSetIRQLine(const int line, const int status);
+void ZetSetVector(int vector);
 int ZetNmi();
 int ZetIdle(int nCycles);
 int ZetSegmentCycles();
 int ZetTotalCycles();
 
-void ZetRaiseIrq(int n);
-void ZetLowerIrq();
-
-static inline int getZET_IRQSTATUS_NONE()
-{
 #ifdef EMU_DOZE
-	if(nZetCpuCore == 2) return DOZE_IRQSTATUS_NONE;
+ #define ZetRaiseIrq(n) ZetSetIRQLine(n, ZET_IRQSTATUS_AUTO)
+ #define ZetLowerIrq() ZetSetIRQLine(0, ZET_IRQSTATUS_NONE)
 #endif
-#ifdef EMU_MAME_Z80
-	if(nZetCpuCore == 1) return 0;
-#endif
-#ifdef EMU_CZ80
-	if(nZetCpuCore == 0) return CZ80_IRQSTATUS_NONE;
-#endif
-}
 
-static inline int getZET_IRQSTATUS_AUTO()
-{
+#ifdef EMU_MAME_Z80
+ #define ZetRaiseIrq(n) ZetSetIRQLine(n, Z80_ASSERT_LINE)
+ #define ZetLowerIrq(n) ZetSetIRQLine(0, Z80_CLEAR_LINE)
+#endif
+
+#ifdef EMU_CZ80
+ #define ZetRaiseIrq(n) ZetSetIRQLine(n, CZ80_IRQSTATUS_AUTO)
+ #define ZetLowerIrq() ZetSetIRQLine(0, CZ80_IRQSTATUS_NONE)
+#endif
+
 #ifdef EMU_DOZE
-	if(nZetCpuCore == 2) return DOZE_IRQSTATUS_AUTO;
+ #define ZET_IRQSTATUS_NONE DOZE_IRQSTATUS_NONE
+ #define ZET_IRQSTATUS_AUTO DOZE_IRQSTATUS_AUTO
+ #define ZET_IRQSTATUS_ACK  DOZE_IRQSTATUS_ACK
 #endif
-#ifdef EMU_MAME_Z80
-	if(nZetCpuCore == 1) return 2;
-#endif
-#ifdef EMU_CZ80
-	if(nZetCpuCore == 0) return CZ80_IRQSTATUS_AUTO;
-#endif
-}
 
-static inline int getZET_IRQSTATUS_ACK()
-{
-#ifdef EMU_DOZE
-	if(nZetCpuCore == 2) return DOZE_IRQSTATUS_ACK;
-#endif
 #ifdef EMU_MAME_Z80
-	if(nZetCpuCore == 1) return 1;
+ #define ZET_IRQSTATUS_NONE 0
+ #define ZET_IRQSTATUS_ACK  1
+ #define ZET_IRQSTATUS_AUTO 2
 #endif
-#ifdef EMU_CZ80
-	if(nZetCpuCore == 0) return CZ80_IRQSTATUS_ACK;
-#endif
-}
 
-#define ZET_IRQSTATUS_NONE getZET_IRQSTATUS_NONE()
-#define ZET_IRQSTATUS_AUTO getZET_IRQSTATUS_AUTO()
-#define ZET_IRQSTATUS_ACK  getZET_IRQSTATUS_ACK()
+#ifdef EMU_CZ80
+ #define ZET_IRQSTATUS_NONE CZ80_IRQSTATUS_NONE
+ #define ZET_IRQSTATUS_AUTO CZ80_IRQSTATUS_AUTO
+ #define ZET_IRQSTATUS_ACK  CZ80_IRQSTATUS_ACK
+#endif
 
 #ifdef EMU_MAME_Z80
 
@@ -129,5 +115,3 @@ void ZetSetReadHandler(unsigned char (__fastcall *pHandler)(unsigned short));
 void ZetSetWriteHandler(void (__fastcall *pHandler)(unsigned short, unsigned char));
 void ZetSetInHandler(unsigned char (__fastcall *pHandler)(unsigned short));
 void ZetSetOutHandler(void (__fastcall *pHandler)(unsigned short, unsigned char));
-
-#endif //_ZET_H_

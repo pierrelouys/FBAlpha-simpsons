@@ -109,6 +109,8 @@ static Z80WriteProgHandler Z80ProgramWrite;
 static Z80ReadOpHandler Z80CPUReadOp;
 static Z80ReadOpArgHandler Z80CPUReadOpArg;
 
+unsigned char Z80Vector = 0;
+
 
 #define VERBOSE 0
 
